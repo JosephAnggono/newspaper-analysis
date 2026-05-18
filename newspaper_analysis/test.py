@@ -46,7 +46,22 @@ for g in df['occ_group'].dropna().unique():
     if len(sub) >= 2:
         occ_corrs[g] = stats.pearsonr(sub['one_step_llm_sentiment_score'], sub['two_step_llm_sentiment_score'])[0]
 
-# 7. Visualizations
+# 7. Language-stratified analysis (NEW - minimal addition)
+lang_results = {}
+for lang in df['language'].dropna().unique():
+    sub = df[df['language'] == lang]
+    if len(sub) >= 2:
+        r_lang, _ = stats.pearsonr(sub['one_step_llm_sentiment_score'], sub['two_step_llm_sentiment_score'])
+        mae_lang = np.abs(sub['one_step_llm_sentiment_score'] - sub['two_step_llm_sentiment_score']).mean()
+        # Directional agreement for this language
+        s1_l = np.where(sub['one_step_llm_sentiment_score'] < -THRESH, 'neg',
+                       np.where(sub['one_step_llm_sentiment_score'] > THRESH, 'pos', 'neu'))
+        s2_l = np.where(sub['two_step_llm_sentiment_score'] < -THRESH, 'neg',
+                       np.where(sub['two_step_llm_sentiment_score'] > THRESH, 'pos', 'neu'))
+        sign_l = (s1_l == s2_l).mean()
+        lang_results[lang] = {'n': len(sub), 'r': r_lang, 'mae': mae_lang, 'sign': sign_l}
+
+# 8. Visualizations
 plt.style.use('seaborn-v0_8-whitegrid')
 fig, axes = plt.subplots(2, 3, figsize=(16, 10))
 
@@ -143,6 +158,11 @@ print(f"  Outliers: {n_outliers} ({n_outliers/len(df)*100:.1f}%)")
 print(f"\n[Subgroup Disagreement]")
 if not np.isnan(factual_mae): print(f"  Factual MAE: {factual_mae:.3f} (n={len(factual)})")
 if not np.isnan(evaluative_mae): print(f"  Evaluative MAE: {evaluative_mae:.3f} (n={len(evaluative)})")
+
+if lang_results:
+    print(f"\n[By Language]")
+    for lang, m in lang_results.items():
+        print(f"  {lang.upper()}: r={m['r']:.3f} | MAE={m['mae']:.3f} | Sign={m['sign']:.1%} (n={m['n']})")
 
 print(f"\n[Recommendation]")
 if r > 0.75 and mae < 0.2 and para_r > 0.75:

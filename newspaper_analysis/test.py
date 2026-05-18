@@ -4,177 +4,150 @@ from scipy import stats
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Load & clean
+# 1. Load & clean
 df = pd.read_csv("newspaper_analysis/entity_sentiment_paragraphs_one_step_vs_two_step.csv")
 df = df[df['one_step_llm_sentiment_score'].notna() & df['two_step_llm_sentiment_score'].notna()].copy()
 
-# 1. DUPLICATE TEXT CHECK
-para_agg = df.groupby('paragraph_text').agg({
+# 2. Paragraph-level robustness check
+para_df = df.groupby('paragraph_text').agg({
     'one_step_llm_sentiment_score': 'mean',
     'two_step_llm_sentiment_score': 'mean'
-})
-para_corr, _ = stats.pearsonr(para_agg['one_step_llm_sentiment_score'], para_agg['two_step_llm_sentiment_score'])
+}).reset_index()
+para_r, _ = stats.pearsonr(para_df['one_step_llm_sentiment_score'], para_df['two_step_llm_sentiment_score'])
 
-# 2. OCCURRENCE IMPACT
+# 3. Core agreement metrics
+r, _ = stats.pearsonr(df['one_step_llm_sentiment_score'], df['two_step_llm_sentiment_score'])
+rho, _ = stats.spearmanr(df['one_step_llm_sentiment_score'], df['two_step_llm_sentiment_score'])
+diff = df['one_step_llm_sentiment_score'] - df['two_step_llm_sentiment_score']
+mae = np.abs(diff).mean()
+rmse = np.sqrt((diff ** 2).mean())
+
+# 4. Directional agreement (±0.3 neutral band)
+THRESH = 0.3
+df['s1'] = np.where(df['one_step_llm_sentiment_score'] < -THRESH, 'neg',
+                    np.where(df['one_step_llm_sentiment_score'] > THRESH, 'pos', 'neu'))
+df['s2'] = np.where(df['two_step_llm_sentiment_score'] < -THRESH, 'neg',
+                    np.where(df['two_step_llm_sentiment_score'] > THRESH, 'pos', 'neu'))
+sign_agg = (df['s1'] == df['s2']).mean()
+
+# 5. Factual vs evaluative split
+factual = df[df['two_step_llm_paragraph_type'] == 'factual']
+evaluative = df[df['two_step_llm_paragraph_type'] == 'evaluative']
+factual_mae = np.abs(factual['one_step_llm_sentiment_score'] - factual['two_step_llm_sentiment_score']).mean() if len(factual) else np.nan
+evaluative_mae = np.abs(evaluative['one_step_llm_sentiment_score'] - evaluative['two_step_llm_sentiment_score']).mean() if len(evaluative) else np.nan
+
+# 6. Occurrence impact
 bins = [0, 1, 3, np.inf]
 labels = ['1 mention', '2-3 mentions', '4+ mentions']
 df['occ_group'] = pd.cut(df['occurrence'], bins=bins, labels=labels, right=False)
-occ_corr = df.groupby('occ_group').apply(
-    lambda g: stats.pearsonr(g['one_step_llm_sentiment_score'], g['two_step_llm_sentiment_score'])[0]
-    if len(g) >= 2 else np.nan
-)
+occ_corrs = {}
+for g in df['occ_group'].dropna().unique():
+    sub = df[df['occ_group'] == g]
+    if len(sub) >= 2:
+        occ_corrs[g] = stats.pearsonr(sub['one_step_llm_sentiment_score'], sub['two_step_llm_sentiment_score'])[0]
 
-# 3. CORE METRICS
-r, _ = stats.pearsonr(df['one_step_llm_sentiment_score'], df['two_step_llm_sentiment_score'])
-mae = np.abs(df['one_step_llm_sentiment_score'] - df['two_step_llm_sentiment_score']).mean()
-
-t = 0.3
-df['s1'] = np.where(df['one_step_llm_sentiment_score'] < -t, 'neg',
-                    np.where(df['one_step_llm_sentiment_score'] > t, 'pos', 'neu'))
-df['s2'] = np.where(df['two_step_llm_sentiment_score'] < -t, 'neg',
-                    np.where(df['two_step_llm_sentiment_score'] > t, 'pos', 'neu'))
-sign_agg = (df['s1'] == df['s2']).mean()
-
-# 4. FACTUAL vs EVALUATIVE
-factual = df[df['two_step_llm_paragraph_type'] == 'factual']
-eval_df = df[df['two_step_llm_paragraph_type'] == 'evaluative']
-
-# 5. GENERATE VISUALIZATIONS
+# 7. Visualizations
 plt.style.use('seaborn-v0_8-whitegrid')
 fig, axes = plt.subplots(2, 3, figsize=(16, 10))
 
-# Plot 1: Bland-Altman Plot
+# scatter: raw scores
 ax = axes[0, 0]
-mean_scores = (df['one_step_llm_sentiment_score'] + df['two_step_llm_sentiment_score']) / 2
-diff_scores = df['one_step_llm_sentiment_score'] - df['two_step_llm_sentiment_score']
-ax.scatter(mean_scores, diff_scores, alpha=0.6, s=20, c='coral', edgecolors='white')
-ax.axhline(diff_scores.mean(), color='red', linestyle='--', label=f"Mean: {diff_scores.mean():.3f}")
-ax.axhline(diff_scores.mean() + 1.96*diff_scores.std(), color='gray', linestyle=':', alpha=0.7, label='±1.96 SD')
-ax.axhline(diff_scores.mean() - 1.96*diff_scores.std(), color='gray', linestyle=':', alpha=0.7)
-ax.set_xlabel('Mean Score')
-ax.set_ylabel('Difference (One-Step - Two-Step)')
-ax.set_title('Bland-Altman Plot')
-ax.legend(fontsize=8)
-ax.grid(alpha=0.3)
+ax.scatter(df['one_step_llm_sentiment_score'], df['two_step_llm_sentiment_score'], alpha=0.6, s=20, c='steelblue', edgecolors='white')
+ax.plot([-1, 1], [-1, 1], 'r--', linewidth=1.5, label='Perfect agreement')
+ax.set_xlabel('One-Step Score'); ax.set_ylabel('Two-Step Score')
+ax.set_title('Entity-Level Score Comparison')
+ax.set_xlim(-1.1, 1.1); ax.set_ylim(-1.1, 1.1)
+ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-# Plot 2: Distribution Comparison
+# distribution overlap
 ax = axes[0, 1]
 bins_hist = np.linspace(-1, 1, 21)
-ax.hist(df['one_step_llm_sentiment_score'], bins=bins_hist, alpha=0.7, 
-        label='One-Step', color='steelblue', edgecolor='white')
-ax.hist(df['two_step_llm_sentiment_score'], bins=bins_hist, alpha=0.7, 
-        label='Two-Step', color='coral', edgecolor='white')
-ax.set_xlabel('Sentiment Score')
-ax.set_ylabel('Frequency')
-ax.set_title('Score Distribution')
-ax.legend(fontsize=8)
-ax.grid(alpha=0.3)
+ax.hist(df['one_step_llm_sentiment_score'], bins=bins_hist, alpha=0.7, label='One-Step', color='steelblue', edgecolor='white')
+ax.hist(df['two_step_llm_sentiment_score'], bins=bins_hist, alpha=0.7, label='Two-Step', color='coral', edgecolor='white')
+ax.set_xlabel('Sentiment Score'); ax.set_ylabel('Frequency')
+ax.set_title('Score Distribution Comparison')
+ax.legend(fontsize=8); ax.grid(alpha=0.3)
 
-# Plot 3: Sign Agreement Heatmap
+# confusion matrix (directional)
 ax = axes[0, 2]
-crosstab = pd.crosstab(df['s1'], df['s2'], normalize='index') * 100
-im = ax.imshow(crosstab, cmap='Blues', aspect='auto', vmin=0, vmax=100)
-ax.set_xticks(range(len(crosstab.columns)))
-ax.set_yticks(range(len(crosstab.index)))
-ax.set_xticklabels(crosstab.columns)
-ax.set_yticklabels(crosstab.index)
-ax.set_xlabel('Two-Step')
-ax.set_ylabel('One-Step')
-ax.set_title('Sign Agreement (%)')
-plt.colorbar(im, ax=ax, label='%')
-for i in range(len(crosstab.index)):
-    for j in range(len(crosstab.columns)):
-        ax.text(j, i, f'{crosstab.iloc[i, j]:.0f}%', ha='center', va='center', fontsize=8)
+cm = pd.crosstab(df['s1'], df['s2'], rownames=['One-step'], colnames=['Two-step'])
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar_kws={'label': 'Count'}, 
+            linewidths=0.5, linecolor='white', square=False)
+ax.set_title('Directional Agreement (counts)', fontsize=12, pad=15)
+ax.set_xlabel('Two-step'); ax.set_ylabel('One-step')
+plt.setp(ax.get_xticklabels(), rotation=0, ha='center')
+plt.setp(ax.get_yticklabels(), rotation=0, va='center')
 
-# Plot 4: Disagreement by Paragraph Type
+# disagreement by paragraph type
 ax = axes[1, 0]
-df_temp = df.copy()
-df_temp['abs_diff'] = np.abs(df_temp['one_step_llm_sentiment_score'] - df_temp['two_step_llm_sentiment_score'])
-if 'two_step_llm_paragraph_type' in df_temp.columns:
-    types = df_temp['two_step_llm_paragraph_type'].unique()
-    means = [df_temp[df_temp['two_step_llm_paragraph_type']==t]['abs_diff'].mean() for t in types]
-    bars = ax.bar(range(len(types)), means, color=plt.cm.Set2(range(len(types))), edgecolor='black')
-    ax.set_xticks(range(len(types)))
-    ax.set_xticklabels(types)
+if not np.isnan(factual_mae):
+    ax.bar(['Factual', 'Evaluative'], [factual_mae, evaluative_mae], color=['#4ECDC4', '#FF6B6B'], edgecolor='black')
     ax.set_ylabel('Mean Absolute Difference')
     ax.set_title('Disagreement by Paragraph Type')
-    for bar, val in zip(bars, means):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, f'{val:.3f}', ha='center', fontsize=8)
+    for i, v in enumerate([factual_mae, evaluative_mae]):
+        ax.text(i, v + 0.005, f'{v:.3f}', ha='center', fontsize=9)
 ax.grid(alpha=0.3, axis='y')
 
-# Plot 5: Agreement by Occurrence
+# agreement by mention frequency
 ax = axes[1, 1]
-occ_labels = [g for g in occ_corr.index if not pd.isna(occ_corr[g])]
-occ_values = [occ_corr[g] for g in occ_labels]
-colors = ['forestgreen' if v > 0.7 else 'orange' for v in occ_values]
-bars = ax.bar(range(len(occ_labels)), occ_values, color=colors, edgecolor='black', alpha=0.8)
-ax.set_xticks(range(len(occ_labels)))
-ax.set_xticklabels(occ_labels, rotation=45, ha='right')
-ax.set_ylabel('Pearson Correlation')
-ax.set_title('Agreement by Entity Occurrence')
-ax.set_ylim(0, 1)
-ax.axhline(0.7, color='red', linestyle='--', alpha=0.7, label='r=0.7 threshold')
-ax.legend(fontsize=8)
-for bar, val in zip(bars, occ_values):
-    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, f'r={val:.3f}', ha='center', fontsize=9, fontweight='bold')
+if occ_corrs:
+    occ_labels = list(occ_corrs.keys())
+    occ_vals = list(occ_corrs.values())
+    colors = ['forestgreen' if v > 0.7 else 'orange' for v in occ_vals]
+    bars = ax.bar(occ_labels, occ_vals, color=colors, edgecolor='black')
+    ax.set_ylabel('Pearson Correlation'); ax.set_title('Agreement by Entity Mention Frequency')
+    ax.set_ylim(0, 1); ax.axhline(0.7, color='red', linestyle='--', alpha=0.7)
+    for bar, v in zip(bars, occ_vals):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, f'{v:.3f}', ha='center', fontsize=9)
 ax.grid(alpha=0.3, axis='y')
 
-# Plot 6: Entity Validity Impact (if entity_exact_word column exists)
+# Tukey mean-difference plot
 ax = axes[1, 2]
-if 'entity_exact_word' in df.columns and 'paragraph_text' in df.columns:
-    def entity_in_text(row):
-        if pd.isna(row['entity_exact_word']) or pd.isna(row['paragraph_text']):
-            return False
-        words = [w.strip() for w in str(row['entity_exact_word']).split('|')]
-        text = str(row['paragraph_text']).lower()
-        return any(word.lower() in text for word in words if word)
-    df['entity_present'] = df.apply(entity_in_text, axis=1)
-    matched = df[df['entity_present']]
-    mismatched = df[~df['entity_present']]
-    corr_matched = stats.pearsonr(matched['one_step_llm_sentiment_score'], matched['two_step_llm_sentiment_score'])[0] if len(matched) >= 2 else np.nan
-    corr_mismatched = stats.pearsonr(mismatched['one_step_llm_sentiment_score'], mismatched['two_step_llm_sentiment_score'])[0] if len(mismatched) >= 2 else np.nan
-    categories = ['Present', 'Missing']
-    corrs = [corr_matched, corr_mismatched]
-    colors = ['forestgreen' if (c and c > 0.5) else 'orange' for c in corrs]
-    bars = ax.bar(categories, [c if not np.isnan(c) else 0 for c in corrs], color=colors, edgecolor='black', alpha=0.8)
-    ax.set_ylabel('Pearson Correlation')
-    ax.set_title('Agreement by Entity Validity')
-    ax.set_ylim(0, 1)
-    ax.axhline(0.7, color='red', linestyle='--', alpha=0.7, label='r=0.7 threshold')
-    ax.legend(fontsize=8)
-    for bar, corr in zip(bars, corrs):
-        if not np.isnan(corr):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, f'r={corr:.3f}', ha='center', fontsize=9, fontweight='bold')
-ax.grid(alpha=0.3, axis='y')
+mean_s = (df['one_step_llm_sentiment_score'] + df['two_step_llm_sentiment_score']) / 2
+diff_s = df['one_step_llm_sentiment_score'] - df['two_step_llm_sentiment_score']
+
+mean_diff = diff_s.mean()
+std_diff = diff_s.std()
+upper_loa = mean_diff + 1.96 * std_diff
+lower_loa = mean_diff - 1.96 * std_diff
+n_outliers = ((diff_s > upper_loa) | (diff_s < lower_loa)).sum()
+
+ax.scatter(mean_s, diff_s, alpha=0.6, s=20, c='steelblue', edgecolors='white')
+ax.axhline(mean_diff, color='red', linestyle='--', linewidth=1.5, label=f'Mean Diff: {mean_diff:.3f}')
+ax.axhline(upper_loa, color='gray', linestyle=':', linewidth=1.5, label=f'Upper LoA (+1.96σ): {upper_loa:.3f}')
+ax.axhline(lower_loa, color='gray', linestyle=':', linewidth=1.5, label=f'Lower LoA (-1.96σ): {lower_loa:.3f}')
+ax.set_xlabel('Mean Score')
+ax.set_ylabel('Difference (One-Step - Two-Step)')
+ax.set_title('Tukey Mean-Difference Analysis')
+ax.legend(fontsize=7, loc='upper right')
+ax.grid(alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('sentiment_analysis_results.png', dpi=300, bbox_inches='tight')
+plt.savefig('entity_sentiment_comparison.png', dpi=300, bbox_inches='tight')
 plt.close()
 
-# OUTPUT
-print("="*60)
-print("SUPERVISOR BRIEF: ONE-STEP vs TWO-STEP LLM")
-print("="*60)
-print(f"Entity-paragraph pairs: {len(df)} | Unique paragraphs: {para_agg.shape[0]}")
-print(f"\n--- Agreement ---")
-print(f"Row-level Pearson r: {r:.3f} | MAE: {mae:.3f}")
-print(f"Paragraph-level r (robustness): {para_corr:.3f}")
-print(f"Sign agreement (±{t}): {sign_agg:.1%}")
-print(f"\n--- By Occurrence ---")
-for g, c in occ_corr.items():
-    if not pd.isna(c):
-        print(f"  {g}: r = {c:.3f}")
-print(f"\n--- Factual vs Evaluative ---")
-print(f"Factual (n={len(factual)}): Two-Step mean={factual['two_step_llm_sentiment_score'].mean():.2f} | One-Step mean={factual['one_step_llm_sentiment_score'].mean():.2f}")
-print(f"Evaluative (n={len(eval_df)}): Two-Step mean={eval_df['two_step_llm_sentiment_score'].mean():.2f} | One-Step mean={eval_df['one_step_llm_sentiment_score'].mean():.2f}")
-print(f"\n{'='*60}")
-print("RECOMMENDATION:")
-if r > 0.75 and mae < 0.2 and para_corr > 0.75:
-    print("USE ONE-STEP. Strong agreement confirmed at both row and paragraph levels. Duplicate text does not inflate results. Occurrence has minimal impact. One-step is simpler and equally reliable.")
-elif len(factual) > 0 and factual['one_step_llm_sentiment_score'].abs().mean() > 0.15:
-    avg_mag = factual['one_step_llm_sentiment_score'].abs().mean()
-    print(f"USE TWO-STEP. One-step assigns non-neutral scores to factual paragraphs (~{avg_mag:.2f} avg magnitude). Two-step correctly forces factual content to neutral, reducing false positives.")
+# 8. Summary
+print("Entity Level Sentiment: One-Step LLM v.s. Two-Step LLM")
+print(f"Valid pairs: {len(df)} | Unique paragraphs: {para_df.shape[0]}")
+print(f"Paragraph-level r (robustness check): {para_r:.3f}")
+
+print(f"\n[Core Metrics]")
+print(f"  Pearson r: {r:.3f} | Spearman ρ: {rho:.3f}")
+print(f"  MAE: {mae:.3f} | RMSE: {rmse:.3f}")
+print(f"  Directional agreement (±{THRESH}): {sign_agg:.1%}")
+
+print(f"\n[Mean-Difference]")
+print(f"  Mean diff: {mean_diff:.3f} | Upper LoA: {upper_loa:.3f} | Lower LoA: {lower_loa:.3f}")
+print(f"  Outliers: {n_outliers} ({n_outliers/len(df)*100:.1f}%)")
+
+print(f"\n[Subgroup Disagreement]")
+if not np.isnan(factual_mae): print(f"  Factual MAE: {factual_mae:.3f} (n={len(factual)})")
+if not np.isnan(evaluative_mae): print(f"  Evaluative MAE: {evaluative_mae:.3f} (n={len(evaluative)})")
+
+print(f"\n[Recommendation]")
+if r > 0.75 and mae < 0.2 and para_r > 0.75:
+    print("  Strong agreement across all checks. ONE-STEP is recommended (simpler, same reliability).")
+elif sign_agg > 0.8:
+    print("  High directional agreement. ONE-STEP preferred for efficiency.")
 else:
-    print("USE ONE-STEP for speed/scale; apply a post-hoc neutral filter if factual suppression is required.")
-print("="*60)
-print(f"\nVisualizations saved to: sentiment_analysis_results.png")
+    print("  Moderate disagreement. Manual review advised before deployment.")

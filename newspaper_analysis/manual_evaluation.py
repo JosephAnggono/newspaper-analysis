@@ -18,7 +18,7 @@ def preprocess_labels(df):
     Maps human labels and model scores to a 5-class integer system:
     -2: Very Negative -1: Negative 0: Neutral 1: Positive 2: Very Positive
     """
-    # 1. Map Human Labels (Strict String Mapping)
+    # 1. Map Human Labels
     label_map = {
         'very negative': -2, 'negative': -1, 'neutral': 0, 'positive': 1, 'very positive': 2,
     }

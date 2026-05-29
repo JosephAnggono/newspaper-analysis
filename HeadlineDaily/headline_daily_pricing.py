@@ -4,7 +4,7 @@ import numpy as np
 
 def analyze_headline_daily():
     # ==================== CONFIGURATION ====================
-    INPUT_CSV = "ad_reclassified_4class.csv"  # Adjust path if needed
+    INPUT_CSV = "Datasets/ad_reclassified_4class.csv"  # Adjust path if needed
     
     # Milestones (Consistent with AM730/SCMP/HKCD)
     MILESTONE_P1_START = pd.Timestamp("2020-01-01")
@@ -191,9 +191,9 @@ def analyze_headline_daily():
                         f'${bar.get_height():,.0f}', ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
-    plt.savefig('headline_daily_4class_revenue.png', dpi=300, bbox_inches='tight')
+    plt.savefig('HeadlineDaily/headline_daily_4class_revenue.png', dpi=300, bbox_inches='tight')
     plt.show()
-    print("Saved: headline_daily_4class_revenue.png")
+    print("Saved: HeadlineDaily/headline_daily_4class_revenue.png")
 
     # --- PLOT 2: 3-CLASS VIEW (COMBINED) ---
     plot_data['Type_Combined'] = plot_data['Type_Classified'].apply(combine_type_3class)
@@ -222,9 +222,9 @@ def analyze_headline_daily():
                         f'${bar.get_height():,.0f}', ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
-    plt.savefig('headline_daily_3class_combined_revenue.png', dpi=300, bbox_inches='tight')
+    plt.savefig('HeadlineDaily/headline_daily_3class_combined_revenue.png', dpi=300, bbox_inches='tight')
     plt.show()
-    print("Saved: headline_daily_3class_combined_revenue.png")
+    print("Saved: HeadlineDaily/headline_daily_3class_combined_revenue.png")
 
 if __name__ == "__main__":
     analyze_headline_daily()

@@ -4,7 +4,7 @@ import numpy as np
 
 def analyze_the_standard():
     # ==================== CONFIGURATION ====================
-    INPUT_CSV = "ad_reclassified_4class.csv"  # Adjust path if needed
+    INPUT_CSV = "Datasets/ad_reclassified_4class.csv"  # Adjust path if needed
     
     # Milestones (Consistent with previous analyses)
     MILESTONE_P1_START = pd.Timestamp("2020-01-01")
@@ -198,7 +198,7 @@ def analyze_the_standard():
                         f'${bar.get_height():,.0f}', ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
-    plt.savefig('the_standard_4class_revenue.png', dpi=300, bbox_inches='tight')
+    plt.savefig('TheStandard/the_standard_4class_revenue.png', dpi=300, bbox_inches='tight')
     plt.show()
     print("Saved: the_standard_4class_revenue.png")
 
@@ -229,7 +229,7 @@ def analyze_the_standard():
                         f'${bar.get_height():,.0f}', ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
-    plt.savefig('the_standard_3class_combined_revenue.png', dpi=300, bbox_inches='tight')
+    plt.savefig('TheStandard/the_standard_3class_combined_revenue.png', dpi=300, bbox_inches='tight')
     plt.show()
     print("Saved: the_standard_3class_combined_revenue.png")
 
